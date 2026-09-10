@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-error.log*
+package-lock.json.bak
+
+# Generated test fixtures — rebuild with `npm run fixtures`
+test/fixtures/
+
+# Vendored ffmpeg.wasm assets — fetch with `npm run vendor`
+vendor/
+
+# Build and coverage output
+dist/
+coverage/
+*.tsbuildinfo
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+desktop.ini

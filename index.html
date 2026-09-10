@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Transcode — convert audio in your browser</title>
+<meta name="description" content="Convert music between Opus, AAC, MP3, FLAC and WAV entirely in your browser. Files are never uploaded.">
+<meta name="color-scheme" content="light">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/app.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><rect width='16' height='16' rx='2' fill='%23191a18'/><rect x='3' y='6' width='2.5' height='4' fill='%23c8811b'/><rect x='6.75' y='4' width='2.5' height='8' fill='%23e0e1dd'/><rect x='10.5' y='7' width='2.5' height='2' fill='%232c6b52'/></svg>">
+</head>
+<body>
+
+<header class="rail">
+  <div class="rail__mark" aria-hidden="true">
+    <span></span><span></span><span></span>
+  </div>
+  <h1 class="rail__name">Transcode</h1>
+  <p class="rail__note">Runs in this tab. Nothing is uploaded.</p>
+</header>
+
+<main>
+  <!-- Hero: the drop plate is the first thing, and the whole point of the page. -->
+  <section class="intake" id="intake" data-state="empty">
+    <div class="intake__pitch">
+      <h2>Make a music library smaller without hearing the difference.</h2>
+      <p>
+        A 320&nbsp;kbps MP3 collection converted to Opus at 160&nbsp;kbps takes up
+        about half the space, and most listeners cannot tell them apart.
+      </p>
+    </div>
+
+    <div class="plate" id="dropzone" tabindex="0" role="button"
+         aria-label="Add audio files. Drop files here or press Enter to browse.">
+      <svg class="plate__glyph" viewBox="0 0 48 24" aria-hidden="true">
+        <rect x="1"  y="9"  width="3" height="6"  rx="1.5"/>
+        <rect x="7"  y="5"  width="3" height="14" rx="1.5"/>
+        <rect x="13" y="1"  width="3" height="22" rx="1.5"/>
+        <rect x="19" y="7"  width="3" height="10" rx="1.5"/>
+        <rect x="25" y="3"  width="3" height="18" rx="1.5"/>
+        <rect x="31" y="8"  width="3" height="8"  rx="1.5"/>
+        <rect x="37" y="4"  width="3" height="16" rx="1.5"/>
+        <rect x="43" y="10" width="3" height="4"  rx="1.5"/>
+      </svg>
+      <p class="plate__lead">Drop audio files here</p>
+      <p class="plate__sub">MP3, M4A, FLAC, WAV, OGG, Opus, AIFF and more</p>
+      <button type="button" class="btn btn--quiet" id="browse">Choose files</button>
+    </div>
+
+    <input type="file" id="picker" multiple hidden>
+  </section>
+
+  <div class="workbench" id="workbench" hidden>
+
+    <!-- Settings -->
+    <section class="controls" aria-labelledby="output-heading">
+      <h2 class="section-title" id="output-heading">Output</h2>
+
+      <div class="formats" id="formats" role="radiogroup" aria-label="Output format"></div>
+
+      <div class="quality">
+        <h3 class="field-label" id="quality-heading">Quality</h3>
+        <div class="segmented" id="qualities" role="radiogroup" aria-labelledby="quality-heading"></div>
+        <p class="quality__note" id="quality-note"></p>
+      </div>
+
+      <label class="check">
+        <input type="checkbox" id="keep-tags" checked>
+        <span>Keep tags and artwork</span>
+      </label>
+
+      <p class="plays" id="plays"></p>
+    </section>
+
+    <!-- Queue -->
+    <section class="queue-panel" aria-labelledby="files-heading">
+      <div class="queue-head">
+        <h2 class="section-title" id="files-heading">Files</h2>
+        <div class="queue-head__actions">
+          <button type="button" class="btn btn--quiet btn--small" id="add-more">Add more</button>
+          <button type="button" class="btn btn--quiet btn--small" id="clear">Clear</button>
+        </div>
+      </div>
+      <ul class="queue" id="queue"></ul>
+    </section>
+  </div>
+</main>
+
+<!-- Action bar, sticky on small screens -->
+<div class="actionbar" id="actionbar" hidden>
+  <div class="actionbar__status" id="status" role="status" aria-live="polite"></div>
+  <div class="actionbar__buttons">
+    <button type="button" class="btn btn--ghost" id="download-all" hidden>Download all as zip</button>
+    <button type="button" class="btn btn--go" id="convert">Convert</button>
+  </div>
+</div>
+
+<footer class="foot">
+  <p>
+    Encoding by <a href="https://github.com/ffmpegwasm/ffmpeg.wasm">ffmpeg.wasm</a>,
+    running locally in this browser tab. No file leaves this device.
+  </p>
+</footer>
+
+<template id="row-template">
+  <li class="row" data-status="reading">
+    <div class="row__art">
+      <img alt="" hidden>
+      <span class="row__art-empty" aria-hidden="true"></span>
+    </div>
+
+    <div class="row__body">
+      <div class="row__heading">
+        <button type="button" class="playbtn row__play" data-kind="source" aria-label="Play original">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5 L10 6 L2.5 10.5 Z"/></svg>
+        </button>
+        <p class="row__title"></p>
+        <button type="button" class="row__remove" aria-label="Remove this file">&times;</button>
+      </div>
+      <p class="row__artist"></p>
+      <p class="row__source"></p>
+
+      <div class="sizes" hidden>
+        <div class="sizes__bar sizes__bar--from">
+          <span class="sizes__fill"></span>
+          <span class="sizes__label"></span>
+        </div>
+        <div class="sizes__bar sizes__bar--to">
+          <span class="sizes__fill"></span>
+          <span class="sizes__label"></span>
+        </div>
+        <p class="sizes__verdict"></p>
+      </div>
+
+      <p class="row__message" hidden></p>
+
+      <div class="row__foot">
+        <button type="button" class="linkish row__edit" hidden>Edit tags</button>
+        <button type="button" class="playbtn playbtn--inline row__play" data-kind="result" hidden aria-label="Play converted">
+          <svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 1.5 L10 6 L2.5 10.5 Z"/></svg>
+          <span>Play converted</span>
+        </button>
+        <a class="btn btn--small row__save" hidden download>Download</a>
+      </div>
+
+      <div class="tagform" hidden>
+        <label>Title <input type="text" data-tag="title"></label>
+        <label>Artist <input type="text" data-tag="artist"></label>
+        <label>Album <input type="text" data-tag="album"></label>
+        <label>Track <input type="text" data-tag="track" inputmode="numeric"></label>
+      </div>
+    </div>
+  </li>
+</template>
+
+<script type="module" src="js/app.js"></script>
+<noscript>
+  <p class="noscript">This converter runs entirely in JavaScript in your browser. Please enable JavaScript to use it.</p>
+</noscript>
+</body>
+</html>
