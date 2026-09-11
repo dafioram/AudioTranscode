@@ -90,8 +90,8 @@ show fewer tags.
 
 | Format | Best for | Artwork |
 | --- | --- | --- |
-| **Opus** | Smallest file at a given quality | No |
-| **AAC** (.m4a) | Small and plays everywhere | Yes |
+| **AAC** (.m4a) | Default. Full quality, smaller than MP3, plays everywhere | Yes |
+| **Opus** | Smallest file, but capped at reduced treble in this app — see below | No |
 | **MP3** | Maximum compatibility | Yes |
 | **FLAC** | Lossless archiving | Yes |
 | **WAV** | Editing and mastering | No |
@@ -100,16 +100,29 @@ Text tags carry across all five. Artwork is embedded where the container
 supports it. Opus stores pictures in a way ffmpeg will not write, so artwork is
 dropped for Opus output and the app says so on the row.
 
+**About Opus specifically:** the exact wasm build this app runs on cannot
+encode Opus at 48 kHz ("fullband," full audible range) at all — every attempt
+throws a WebAssembly crash, confirmed directly against the real
+`ffmpeg-core.wasm` binary (see Troubleshooting). The fix is to encode at
+24 kHz instead, which avoids the crash but caps audible bandwidth at roughly
+12 kHz *regardless of bitrate* — cymbals, upper harmonics, and general "air"
+above that are cut, on every quality tier. That's a real trade-off, not a
+technicality, which is why AAC — unaffected by this limitation — is the
+default here rather than Opus, even though Opus can still produce a smaller
+file for anyone who wants that and is fine with the ceiling.
+
 ### Converting a 320 kbps MP3 library
 
 MP3 is already lossy. Anything you convert it to is a re-encode of data that has
 already been thrown away, so the goal is "no *further* audible loss", not
 recovering quality that is gone.
 
-- **Opus at 160k** — roughly half the size, and indistinguishable from the
-  source for most listeners. Best choice if your players support it.
-- **AAC at 192k** — larger than the Opus option, but plays on iOS, car stereos
-  and anything else you are likely to own.
+- **AAC at 192k** (the default here) — full range, noticeably smaller than a
+  320k MP3, and it plays on essentially everything: iOS, car stereos, Android,
+  Windows.
+- **Opus at 160k** — smaller still, but see the treble cap above. Fine for
+  spoken word, podcasts, or casual listening; more likely to be noticeable on
+  music with cymbals or strings, especially on good headphones.
 - **Avoid FLAC** — lossless, but lossless-encoding a lossy source just makes a
   bigger file with no quality gain. The app flags this: the size bar turns amber
   and says the file grows.
@@ -228,6 +241,37 @@ per file. `test/converter.test.mjs` locks this in with a fake `FFmpeg` class
 that would fail the test if a future change went back to one shared,
 cached instance.
 
+**Opus conversion specifically throws `RuntimeError: memory access out of
+bounds`, while other formats work fine.** This is a real, permanent
+limitation of the exact `@ffmpeg/core` 0.12.10 single-threaded build this app
+uses (0.12.10 is also the latest version published, so there's no newer
+release to upgrade to): it cannot encode Opus at 48 kHz — "fullband," the
+mode covering the full range of human hearing — at all. Every attempt
+crashes, with or without `-vbr`, `-application`, metadata mapping, or
+anything else, and it doesn't matter whether the source is already 48 kHz
+(so it isn't specifically a resampling problem). This was confirmed directly,
+not just from reading about it: by loading the actual `ffmpeg-core.wasm`
+binary in Node and driving it with a fresh instance per test (the same
+approach as the bug above, and for the same reason — a shared instance would
+contaminate the results), every 48 kHz attempt crashed and every 24 kHz and
+16 kHz attempt succeeded, on the exact same source file. It's also reported
+upstream: [ffmpegwasm/ffmpeg.wasm#591](https://github.com/ffmpegwasm/ffmpeg.wasm/issues/591)
+and [#867](https://github.com/ffmpegwasm/ffmpeg.wasm/issues/867).
+
+The fix in `js/formats.js` is `-ar 24000` — the highest confirmed-working
+rate — verified by running the *actual* `buildArgs()` output for every Opus
+quality tier against the real core binary (`96k` through `192k` all
+succeeded with sensible output sizes). But this is a real trade-off, not a
+technicality: 24 kHz caps audible bandwidth at roughly 12 kHz no matter the
+bitrate, which is why this app's default format changed from Opus to AAC —
+AAC has no such ceiling here — rather than quietly shipping degraded audio
+under an unchanged "best quality" recommendation. Opus is still available
+for anyone who wants the smaller file and is fine with the cap; the copy in
+the app and in this README says so rather than repeating the old "sounds
+like 320k MP3" claim, which was only ever true for 48 kHz Opus.
+`test/metadata.test.mjs` asserts every Opus quality tier's built command
+includes `-ar 24000` and never `48000`.
+
 **CI failed on "non-ASCII filenames round-trip through the UTF-8 flag" with a
 garbled filename in the error, like `L├еt тДЦ 3 тАФ цЭ▒ф║м.opus` instead of
 `Låt № 3 — 東京.opus`.** This is a genuine bug in Info-ZIP UnZip 6.00
@@ -248,7 +292,7 @@ inheriting whatever the calling shell happens to have set.
 npm test
 ```
 
-80 tests covering the parts that are easy to get quietly wrong:
+81 tests covering the parts that are easy to get quietly wrong:
 
 - **Tag parsing** against real files written by the ffmpeg CLI, not hand-made
   byte blobs. Covers ID3v2.2/2.3/2.4 including UTF-16 text, MP4 atoms, FLAC
@@ -256,6 +300,9 @@ npm test
   down to JPEG and PNG magic bytes.
 - **Duration** from Xing VBR headers, FLAC STREAMINFO, MP4 `mvhd`, Ogg granule
   positions and WAV byte rates.
+- **The ffmpeg commands each format builds**, including that every Opus
+  quality tier requests the crash-safe 24 kHz and never 48 kHz — see
+  Troubleshooting for why that matters.
 - **The zip writer**, round-tripped through the system `unzip` binary, so a pass
   means a standard archiver accepts the output. Includes CRC checks, non-ASCII
   filenames, duplicate names and path-traversal sanitising.
@@ -282,15 +329,19 @@ test flaking.
 
 ### What is not covered
 
-ffmpeg.wasm itself is stubbed in the test suite — there is no browser here, so
-the actual encode is only exercised by running the app in one. What *is*
-independently verified without a browser: the vendored files are fetched for
-real (via the npm registry) and checksummed identical to the published
-package contents, they're confirmed servable at the exact paths
-`js/config.js` expects, and the codecs and ffmpeg options this app uses were
-confirmed present in the actual `ffmpeg-core.wasm` binary. The one thing that
-still can't be verified outside a real browser is the full click-Convert-see-
-a-file round trip.
+ffmpeg.wasm is stubbed inside the automated test suite itself — `npm test`
+doesn't spend 32 MB and real wasm execution on every run. But "not in the
+automated suite" isn't the same as "never actually run": every codec path
+this app uses (Opus at every quality tier, AAC, MP3, FLAC) has been driven
+directly against the real `ffmpeg-core.wasm` binary by loading it in Node
+with a fresh instance per test — the same binary that ships in `vendor/` —
+and checked for a real success exit code and a real, correctly-sized output
+file, not just an absence of exceptions. That's how both the instance-reuse
+bug and the Opus 48 kHz crash in Troubleshooting were actually found and
+confirmed fixed, rather than guessed at. What that verification can't stand
+in for is the browser itself: real Worker cross-origin behavior, real COOP/
+COEP-free page loading, and the full click-Convert-see-a-file round trip in
+an actual tab are the one thing that still needs a real browser to confirm.
 
 ---
 

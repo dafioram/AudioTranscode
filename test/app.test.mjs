@@ -17,6 +17,7 @@ import { JSDOM } from 'jsdom';
 
 import { readMetadata } from '../js/metadata.js';
 import { buildZip } from '../js/zipwriter.js';
+import { FORMATS } from '../js/formats.js';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, 'fixtures');
@@ -67,13 +68,14 @@ before(async () => {
         encoderCalls.push(job);
         if (job.file.name.includes('BROKEN')) throw new Error('The encoder rejected this file.');
         // Roughly the size the real encoder would produce at this bitrate.
+        const fmt = FORMATS[job.formatId];
         const seconds = 3.5;
-        const kbps = Number(job.qualityId) || 160;
+        const kbps = Number(job.qualityId) || 192;
         const size = Math.round((seconds * kbps * 1000) / 8);
         return {
           bytes: new Uint8Array(size).fill(7),
-          mime: 'audio/ogg',
-          ext: 'opus',
+          mime: fmt.mime,
+          ext: fmt.ext,
           droppedArt: false,
         };
       },
@@ -153,27 +155,27 @@ async function addFiles(files) {
 
 // ---------------------------------------------------------------- rendering
 
-test('format list renders every format with Opus selected first', () => {
+test('format list renders every format with AAC selected first', () => {
   const buttons = $$('.fmt');
   assert.equal(buttons.length, 5);
-  assert.equal(buttons[0].querySelector('.fmt__name').textContent, 'Opus');
+  assert.equal(buttons[0].querySelector('.fmt__name').textContent, 'AAC');
   assert.equal(buttons[0].getAttribute('aria-checked'), 'true');
   assert.equal(buttons[1].getAttribute('aria-checked'), 'false');
 });
 
 test('quality segments follow the selected format', () => {
   const labels = $$('.seg').map((b) => b.textContent);
-  assert.deepEqual(labels, ['96k', '128k', '160k', '192k']);
+  assert.deepEqual(labels, ['128k', '192k', '256k']);
   const checked = $$('.seg').find((b) => b.getAttribute('aria-checked') === 'true');
-  assert.equal(checked.textContent, '160k', 'should default to the suggested 160k');
+  assert.equal(checked.textContent, '192k', 'should default to the suggested 192k');
 });
 
 test('switching format swaps in that format\'s qualities', () => {
   $$('.fmt')[2].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // MP3
   assert.deepEqual($$('.seg').map((b) => b.textContent), ['V4', 'V2', 'V0', '320k']);
 
-  $$('.fmt')[0].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // back to Opus
-  assert.deepEqual($$('.seg').map((b) => b.textContent), ['96k', '128k', '160k', '192k']);
+  $$('.fmt')[0].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // back to AAC
+  assert.deepEqual($$('.seg').map((b) => b.textContent), ['128k', '192k', '256k']);
 });
 
 // ---------------------------------------------------------------- intake
@@ -225,7 +227,7 @@ test('clicking play toggles to a playing state and back', () => {
 });
 
 
-test('the size comparison estimates a smaller Opus file', () => {
+test('the size comparison estimates a smaller AAC file', () => {
   const verdict = $('.row .sizes__verdict');
   assert.equal(verdict.dataset.direction, 'smaller');
   assert.match(verdict.textContent, /Saves .*smaller/);
@@ -234,16 +236,16 @@ test('the size comparison estimates a smaller Opus file', () => {
   const sourceWidth = parseFloat(bars[0].style.width);
   const targetWidth = parseFloat(bars[1].style.width);
   assert.equal(sourceWidth, 100, 'the larger file should set the scale');
-  assert.ok(targetWidth < 70, `Opus 160k should be well under the 320k source, got ${targetWidth}%`);
+  assert.ok(targetWidth < 70, `AAC 192k should be well under the 320k source, got ${targetWidth}%`);
 });
 
 test('changing quality moves the estimate', () => {
   const before = parseFloat($$('.row .sizes__fill')[1].style.width);
-  $$('.seg')[0].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // 96k
+  $$('.seg')[0].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // 128k
   const after = parseFloat($$('.row .sizes__fill')[1].style.width);
-  assert.ok(after < before, `96k should estimate smaller than 160k (${after} vs ${before})`);
+  assert.ok(after < before, `128k should estimate smaller than 192k (${after} vs ${before})`);
 
-  $$('.seg')[2].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // back to 160k
+  $$('.seg')[1].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // back to 192k
 });
 
 test('choosing FLAC warns that the file grows', () => {
@@ -252,7 +254,7 @@ test('choosing FLAC warns that the file grows', () => {
   assert.equal(verdict.dataset.direction, 'bigger', 'FLAC from a 320k MP3 is larger');
   assert.match(verdict.textContent, /larger/);
 
-  $$('.fmt')[0].dispatchEvent(new dom.window.Event('click', { bubbles: true }));
+  $$('.fmt')[0].dispatchEvent(new dom.window.Event('click', { bubbles: true })); // back to AAC
 });
 
 test('the status line totals the batch', () => {
@@ -279,15 +281,15 @@ test('converting produces a download with a tag-derived filename', async () => {
   await waitFor(() => $('.row').dataset.status === 'done');
 
   assert.equal(encoderCalls.length, 1);
-  assert.equal(encoderCalls[0].formatId, 'opus');
-  assert.equal(encoderCalls[0].qualityId, '160');
+  assert.equal(encoderCalls[0].formatId, 'm4a');
+  assert.equal(encoderCalls[0].qualityId, '192');
 
   const row = $('.row');
   assert.equal(row.dataset.status, 'done');
 
   const save = row.querySelector('.row__save');
   assert.equal(save.hidden, false);
-  assert.equal(save.getAttribute('download'), 'Marion Vale - Slow Tide (Remaster).opus');
+  assert.equal(save.getAttribute('download'), 'Marion Vale - Slow Tide (Remaster).m4a');
 });
 
 // -------------------------------------------------------- playback, after conversion
@@ -316,7 +318,7 @@ test('cover art is handed to the encoder when tags are kept', () => {
 
 test('the finished row reports the real output size, not the estimate', () => {
   const label = $$('.row .sizes__label')[1].textContent;
-  assert.match(label, /Opus$/, 'a finished row should drop the "estimated" wording');
+  assert.match(label, /AAC$/, 'a finished row should drop the "estimated" wording');
 });
 
 test('the summary reports the total saving', () => {

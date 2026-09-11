@@ -185,6 +185,25 @@ test('opus command drops cover art and asks for VBR', () => {
   assert.ok(line.includes('-map 0:a:0'));
 });
 
+// Encoding Opus at 48 kHz — ffmpeg's default when -ar is left unset — throws
+// a WebAssembly `RuntimeError: memory access out of bounds` in this exact
+// @ffmpeg/core 0.12.10 build, confirmed by driving the real core.wasm
+// directly (see the file comment in js/formats.js). 24 kHz is the highest
+// sample rate confirmed to work. This test exists so a future edit that
+// drops -ar, or reintroduces 48000, fails loudly here instead of silently
+// shipping a crash.
+test('every Opus quality tier requests the crash-safe 24 kHz, never 48 kHz', () => {
+  for (const quality of FORMATS.opus.qualities) {
+    const args = buildArgs({
+      inputName: 'in.mp3', outputName: 'out.opus', formatId: 'opus',
+      qualityId: quality.id, coverName: null, tags: {},
+    });
+    const line = args.join(' ');
+    assert.ok(line.includes('-ar 24000'), `${quality.label}: missing the crash-safe sample rate`);
+    assert.ok(!line.includes('48000'), `${quality.label}: must never request 48 kHz`);
+  }
+});
+
 test('mp3 command muxes cover art with the front-cover disposition', () => {
   const args = buildArgs({
     inputName: 'in.flac', outputName: 'out.mp3', formatId: 'mp3',

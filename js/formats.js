@@ -6,6 +6,27 @@
  * aac, flac, pcm_s16le, plus the -movflags/-id3v2_version/-compression_level
  * options used below. libfdk_aac is NOT in the build, so AAC uses the native
  * encoder.
+ *
+ * IMPORTANT — Opus and the 48 kHz crash. This exact wasm build cannot encode
+ * Opus at 48 kHz ("fullband," the mode that covers the full range of human
+ * hearing) at all: every attempt throws a low-level
+ * `RuntimeError: memory access out of bounds`, with or without -vbr,
+ * -application, metadata mapping, or anything else — confirmed directly by
+ * driving the actual ffmpeg-core.wasm binary in Node with a fresh instance
+ * per test, not just by reading about it. It's also reported upstream:
+ * ffmpegwasm/ffmpeg.wasm#591 and #867. 24 kHz and 16 kHz were both confirmed
+ * to work in the same tests.
+ *
+ * The fix below is `-ar 24000` — the highest confirmed-working rate — but
+ * that is a real, audible trade-off, not a technicality: Opus at 24 kHz is
+ * "super-wideband," capped at roughly 12 kHz of audio bandwidth by the
+ * sample rate itself, regardless of bitrate. Cymbals, upper harmonics, and
+ * general "air" above that get cut. This is why AAC, not Opus, is this
+ * app's default and flagged recommendation — AAC has no such limit in this
+ * build and reliably preserves full bandwidth. Opus is still offered for
+ * anyone who wants the smaller file and is fine with that ceiling, with
+ * copy below that says so rather than repeating the old "indistinguishable
+ * from 320k MP3" claim, which was only ever true for 48 kHz Opus.
  */
 
 /** Formats we can hand to ffmpeg as input. */
@@ -17,6 +38,10 @@ export const INPUT_EXTENSIONS = [
 export const INPUT_ACCEPT = 'audio/*,video/mp4,video/webm,' +
   INPUT_EXTENSIONS.map((e) => '.' + e).join(',');
 
+// The one confirmed-working Opus sample rate below the broken 48 kHz. See
+// the file comment above — this is a crash workaround, not a preference.
+const OPUS_SAFE_SAMPLE_RATE = 24000;
+
 export const FORMATS = {
   opus: {
     id: 'opus',
@@ -25,15 +50,21 @@ export const FORMATS = {
     mime: 'audio/ogg',
     lossless: false,
     coverArt: false,
-    summary: 'The smallest file for a given quality.',
+    summary: 'Smallest file, but this app caps its treble — see note.',
     plays: 'Chrome, Firefox, Edge, Android, VLC, Foobar2000. Not on older iPods or many car heads.',
     qualities: [
-      { id: '96', label: '96k', kbps: 96, note: 'Spoken word, background listening' },
-      { id: '128', label: '128k', kbps: 128, note: 'Clean for most music' },
-      { id: '160', label: '160k', kbps: 160, note: 'Matches 320k MP3 for most ears', suggested: true },
-      { id: '192', label: '192k', kbps: 192, note: 'Headroom for dense mixes' },
+      { id: '96', label: '96k', kbps: 96, note: 'Spoken word, podcasts, background listening' },
+      { id: '128', label: '128k', kbps: 128, note: 'Smallest file that still sounds clean' },
+      {
+        id: '160', label: '160k', kbps: 160, suggested: true,
+        note: 'Cymbals and high harmonics are softened — a real limit in this browser encoder, not this bitrate. Choose AAC for full range.',
+      },
+      { id: '192', label: '192k', kbps: 192, note: 'Most headroom this app\u2019s Opus can use' },
     ],
-    args: (q) => ['-c:a', 'libopus', '-b:a', `${q.kbps}k`, '-vbr', 'on', '-application', 'audio'],
+    args: (q) => [
+      '-c:a', 'libopus', '-b:a', `${q.kbps}k`, '-vbr', 'on', '-application', 'audio',
+      '-ar', String(OPUS_SAFE_SAMPLE_RATE),
+    ],
   },
 
   m4a: {
@@ -43,7 +74,7 @@ export const FORMATS = {
     mime: 'audio/mp4',
     lossless: false,
     coverArt: true,
-    summary: 'Smaller than MP3, and it plays everywhere.',
+    summary: 'Full quality, smaller than MP3, plays everywhere.',
     plays: 'iPhone, iPad, Mac, Apple Music, Android, Windows, car stereos, Sonos.',
     qualities: [
       { id: '128', label: '128k', kbps: 128, note: 'Small, fine on earbuds' },
@@ -109,9 +140,9 @@ export const FORMATS = {
   },
 };
 
-export const FORMAT_ORDER = ['opus', 'm4a', 'mp3', 'flac', 'wav'];
+export const FORMAT_ORDER = ['m4a', 'opus', 'mp3', 'flac', 'wav'];
 
-export const DEFAULT_FORMAT = 'opus';
+export const DEFAULT_FORMAT = 'm4a';
 
 /** Quality entry marked `suggested` for a format, else the first one. */
 export function defaultQuality(formatId) {

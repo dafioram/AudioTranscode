@@ -522,10 +522,10 @@ function renderFormats() {
 
     button.append(dot, name, note);
 
-    if (id === 'opus') {
+    if (id === 'm4a') {
       const flag = document.createElement('span');
       flag.className = 'fmt__flag';
-      flag.textContent = 'Best size for the quality';
+      flag.textContent = 'Recommended: full quality, smaller file';
       button.append(flag);
     }
 
